@@ -1,5 +1,11 @@
 # modera/composer-monorepo-plugin
 
+## Installation
+
+```sh
+$ composer require modera/composer-monorepo-plugin
+```
+
 ## Usage
 
 composer.json
