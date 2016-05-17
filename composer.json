@@ -1,0 +1,23 @@
+{
+    "name": "modera/composer-monorepo-plugin",
+    "type": "composer-plugin",
+    "licence": "MIT",
+    "authors": [
+        {
+            "name": "Sergei Vizel",
+            "email": "sergei.vizel@modera.org"
+        }
+    ],
+    "require": {
+        "composer-plugin-api": "^1.0.0"
+    },
+    "autoload": {
+        "psr-0": { "Modera\\Composer\\MonorepoPlugin": "src/" }
+    },
+    "extra": {
+        "class": "Modera\\Composer\\MonorepoPlugin\\Plugin",
+        "branch-alias": {
+            "dev-master": "1.0-dev"
+        }
+    }
+}
