@@ -3,7 +3,8 @@
 ## Installation
 
 ```sh
-$ composer require modera/composer-monorepo-plugin
+$ composer config -g repositories.dev_modera composer https://packages.dev.modera.org
+$ composer global require modera/composer-monorepo-plugin:dev-master
 ```
 
 ## Usage
@@ -13,10 +14,6 @@ composer.json
 ```json
 {
     ...
-    "require": {
-        ...
-        "modera/composer-monorepo-plugin": "dev-master"
-    },
     "extra": {
         "modera-monorepo": {
             "include": [

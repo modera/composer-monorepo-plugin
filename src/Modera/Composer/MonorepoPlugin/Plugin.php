@@ -3,17 +3,22 @@
 namespace Modera\Composer\MonorepoPlugin;
 
 use Composer\Composer;
+use Composer\Script\Event;
 use Composer\Package\Link;
 use Composer\Json\JsonFile;
 use Composer\IO\IOInterface;
+use Composer\Script\ScriptEvents;
+use Composer\Package\AliasPackage;
 use Composer\Plugin\PluginInterface;
+use Composer\Installer\PackageEvent;
 use Composer\Package\CompletePackage;
 use Composer\Package\RootAliasPackage;
 use Composer\Installer\InstallerEvent;
 use Composer\Installer\InstallerEvents;
 use Composer\Package\Loader\ArrayLoader;
-use Composer\Repository\ComposerRepository;
+use Composer\Package\RootPackageInterface;
 use Composer\EventDispatcher\EventSubscriberInterface;
+use Composer\DependencyResolver\Operation\UpdateOperation;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
@@ -22,6 +27,11 @@ use Symfony\Component\Console\Output\OutputInterface;
  */
 class Plugin implements PluginInterface, EventSubscriberInterface
 {
+    /**
+     * @var Composer $composer
+     */
+    protected $composer;
+
     /**
      * @var IOInterface $io
      */
@@ -33,9 +43,24 @@ class Plugin implements PluginInterface, EventSubscriberInterface
     protected $output;
 
     /**
-     * @var Composer $composer
+     * @var int
      */
-    protected $composer;
+    protected $outputVerbosity;
+
+    /**
+     * @var bool
+     */
+    protected $update = false;
+
+    /**
+     * @var bool
+     */
+    protected $process = true;
+
+    /**
+     * @var array
+     */
+    protected $packageDirCache = array();
 
     /**
      * {@inheritdoc}
@@ -46,9 +71,11 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         $this->composer = $composer;
 
         $reflector = new \ReflectionObject($this->io);
-        $method = $reflector->getMethod('getErrorOutput');
-        $method->setAccessible(true);
-        $this->output = $method->invoke($this->io);
+        $getErrorOutputMethod = $reflector->getMethod('getErrorOutput');
+        $getErrorOutputMethod->setAccessible(true);
+
+        $this->output = $getErrorOutputMethod->invoke($this->io);
+        $this->outputVerbosity = $this->output->getVerbosity();
     }
 
     /**
@@ -56,9 +83,35 @@ class Plugin implements PluginInterface, EventSubscriberInterface
      */
     public static function getSubscribedEvents()
     {
-        return array(
-            InstallerEvents::PRE_DEPENDENCIES_SOLVING => 'preDependenciesSolving',
+        $response = array(
+            ScriptEvents::PRE_UPDATE_CMD => array(
+                array('preUpdateCmd', PHP_INT_MAX)
+            ),
+            InstallerEvents::PRE_DEPENDENCIES_SOLVING => array(
+                array('preDependenciesSolving', PHP_INT_MAX)
+            ),
         );
+
+        foreach (array('PRE_PACKAGE_', 'POST_PACKAGE_') as $prefix) {
+            foreach (array('INSTALL', 'UPDATE', 'UNINSTALL') as $type) {
+                $event = 'Composer\Installer\PackageEvents::'.$prefix.$type;
+                if (defined($event)) {
+                    $response[constant($event)] = array(
+                        array('onPackageEvents', PHP_INT_MAX),
+                    );
+                }
+            }
+        }
+
+        return $response;
+    }
+
+    /**
+     * @param Event $event
+     */
+    public function preUpdateCmd(Event $event)
+    {
+        $this->update = true;
     }
 
     /**
@@ -66,64 +119,158 @@ class Plugin implements PluginInterface, EventSubscriberInterface
      */
     public function preDependenciesSolving(InstallerEvent $event)
     {
-        $extra = array(
-            'require' => array(),
-            'require-dev' => array(),
-        );
-
-        $root = $this->composer->getPackage();
-        if ($root instanceof RootAliasPackage) {
-            $root = $root->getAliasOf();
-        }
-        if ($this->canHandle($root)) {
-            $extra = $this->process($event, $root, getcwd(), $extra);
+        if (!$this->update) {
+            return;
         }
 
-        $verbosity = $this->output->getVerbosity();
-        for ($i = 1; $i < $event->getPool()->count(); $i++) {
-            $package = $event->getPool()->packageById($i);
+        if (!$this->process) {
+            return;
+        }
 
-            if ($package instanceof CompletePackage && $this->canHandle($package)) {
-                $process = false;
-                foreach ($event->getRequest()->getJobs() as $job) {
-                    if (isset($job['packageName']) && $package->getName() == $job['packageName']) {
-                        $process = true;
-                    }
+        $this->process = false;
+
+        $request = $event->getRequest();
+        $packages = $this->getPackages($event);
+
+        foreach ($packages as $package) {
+            $isDevMode = false;
+            if ($event->isDevMode()) {
+                if ($package instanceof RootPackageInterface) {
+                    $isDevMode = true;
                 }
+            }
 
-                if ($process && $package->getRepository() instanceof ComposerRepository) {
-                    $targetDir = tempnam(sys_get_temp_dir(), '');
-                    unlink($targetDir);
-                    mkdir($targetDir);
-                    $dm = $event->getComposer()->getDownloadManager();
-                    $this->output->setVerbosity(OutputInterface::VERBOSITY_QUIET);
-                    $dm->download($package, $targetDir);
-                    $this->output->setVerbosity($verbosity);
+            $data = $this->loadIncludeFiles($package);
 
-                    $extra = $this->process($event, $package, $targetDir, $extra);
+            foreach ($data as $json) {
+                $_package = $this->loadPackage($json);
+
+                $requires = $package->getRequires();
+                $_requires = $_package->getRequires();
+                foreach (array_keys($package->getReplaces()) as $key) {
+                    unset($_requires[$key]);
+                }
+                foreach ($_requires as $name => $link) {
+                    $link = $requires[$name] = new Link(
+                        $package->getName(),
+                        $link->getTarget(),
+                        $link->getConstraint(),
+                        $link->getDescription(),
+                        $link->getPrettyConstraint()
+                    );
+
+                    $this->io->writeError(
+                        'Adding dependency <comment>'.$link.'</comment>',
+                        true,
+                        IOInterface::VERY_VERBOSE
+                    );
+                    $request->install($link->getTarget(), $link->getConstraint());
+                }
+                $package->setRequires($requires);
+
+                if ($isDevMode) {
+                    $devRequires = $package->getDevRequires();
+                    $_devRequires = $_package->getDevRequires();
+                    foreach (array_keys($package->getReplaces()) as $key) {
+                        unset($_devRequires[$key]);
+                    }
+                    foreach ($_devRequires as $name => $link) {
+                        $link = $devRequires[$name] = new Link(
+                            $package->getName(),
+                            $link->getTarget(),
+                            $link->getConstraint(),
+                            $link->getDescription(),
+                            $link->getPrettyConstraint()
+                        );
+                        $this->io->writeError(
+                            'Adding dev dependency <comment>'.$link.'</comment>',
+                            true,
+                            IOInterface::VERY_VERBOSE
+                        );
+                        $request->install($link->getTarget(), $link->getConstraint());
+                    }
+                    $package->setDevRequires($devRequires);
                 }
             }
         }
+    }
 
-        $request = $event->getRequest();
-
-        /* @var Link $link */
-        foreach ($extra['require'] as $link) {
-            $this->io->writeError(
-                'Adding dependency <comment>'.$link.'</comment>',
-                true,
-                IOInterface::VERBOSE
-            );
-            $request->install($link->getTarget(), $link->getConstraint());
+    /**
+     * @param PackageEvent $event
+     */
+    public function onPackageEvents(PackageEvent $event)
+    {
+        $prefix = 'PRE_PACKAGE_';
+        if (false !== strpos($event->getName(), 'post-package-')) {
+            $prefix = 'POST_PACKAGE_';
         }
 
-        /* @var Link $link */
-        foreach ($extra['require-dev'] as $link) {
-            $this->io->writeError('Adding dev dependency <comment>'.$link.'</comment>',
-                true,
-                IOInterface::VERBOSE
-            );
-            $request->install($link->getTarget(), $link->getConstraint());
+        $operation = $event->getOperation();
+
+        $packageEvent = 'Composer\Installer\PackageEvents::'.$prefix.strtoupper($operation->getJobType());
+        if (!defined($packageEvent)) {
+            return;
+        }
+
+        if ($operation instanceof UpdateOperation) {
+            $package = $operation->getTargetPackage();
+        } else {
+            $package = $operation->getPackage();
+        }
+
+        $operationClass = get_class($operation);
+        $eventDispatcher = $this->composer->getEventDispatcher();
+
+        $reflector = new \ReflectionObject($eventDispatcher);
+        $popEventMethod = $reflector->getMethod('popEvent');
+        $popEventMethod->setAccessible(true);
+
+        $extra = $package->getExtra();
+        if (isset($extra['modera-monorepo']['packages'])) {
+            foreach ($extra['modera-monorepo']['packages'] as $json) {
+                $_package = $this->loadPackage($json);
+                if ($operation instanceof UpdateOperation) {
+                    $mockOperation = new $operationClass(
+                        $operation->getInitialPackage(),
+                        $_package,
+                        $operation->getReason()
+                    );
+                } else {
+                    $mockOperation = new $operationClass(
+                        $_package,
+                        $operation->getReason()
+                    );
+                }
+
+                $popEventMethod->invoke($eventDispatcher);
+                $eventDispatcher->dispatchPackageEvent(
+                    constant($packageEvent),
+                    $event->isDevMode(),
+                    $event->getPolicy(),
+                    $event->getPool(),
+                    $event->getInstalledRepo(),
+                    $event->getRequest(),
+                    $event->getOperations(),
+                    $mockOperation
+                );
+
+                if ($prefix == 'PRE_PACKAGE_') {
+                    $msg = '  - ';
+                    if ('uninstall' == $operation->getJobType()) {
+                        $msg .= 'Removing';
+                    } else {
+                        $msg .= ucfirst($operation->getJobType()) . 'ing';
+                    }
+                    $msg .= ' <info>' . $_package->getName() . '</info>';
+                    $msg .= ' (<comment>' . $package->getFullPrettyVersion() . '</comment>)';
+
+                    $this->io->writeError(
+                        $msg,
+                        true,
+                        IOInterface::VERBOSE
+                    );
+                }
+            }
         }
     }
 
@@ -143,29 +290,84 @@ class Plugin implements PluginInterface, EventSubscriberInterface
 
     /**
      * @param InstallerEvent $event
-     * @param CompletePackage $package
-     * @param $targetDir
-     * @param array $extra
      * @return array
      */
-    protected function process(InstallerEvent $event, CompletePackage $package, $targetDir, array $extra)
+    protected function getPackages(InstallerEvent $event)
     {
-        $root = $this->composer->getPackage();
+        $packages = array();
 
-        $isDevMode = false;
-        if ($event->isDevMode()) {
-            if ($root->getName() == $package->getName()) {
-                $isDevMode = true;
+        $root = $this->composer->getPackage();
+        if ($root instanceof RootAliasPackage) {
+            $root = $root->getAliasOf();
+        }
+        if ($this->canHandle($root)) {
+            $packages[] = $root;
+        }
+
+        $request = $event->getRequest();
+        for ($i = 1; $i < $event->getPool()->count(); $i++) {
+            $package = $event->getPool()->packageById($i);
+
+            if ($package instanceof AliasPackage) {
+                $package = $package->getAliasOf();
+            }
+
+            if ($this->canHandle($package)) {
+                foreach ($request->getJobs() as $job) {
+                    if (isset($job['packageName']) && $package->getName() == $job['packageName']) {
+                        if ('remove' != $job['cmd']) {
+                            $packages[] = $package;
+                        }
+                    }
+                }
             }
         }
 
-        $patterns = array();
-        $_extra = $package->getExtra();
-        foreach ($_extra['modera-monorepo']['include'] as $path) {
-            $patterns[] = $targetDir . DIRECTORY_SEPARATOR . $path;
+        return $packages;
+    }
+
+    /**
+     * @param CompletePackage $package
+     * @return mixed|string
+     */
+    protected function getPackageDir(CompletePackage $package)
+    {
+        if ($package instanceof RootPackageInterface) {
+            return getcwd();
         }
 
-        $files = array_map(
+        if (isset($this->packageDirCache[$package->getName()])) {
+            return $this->packageDirCache[$package->getName()];
+        }
+
+        $packageDir = tempnam(sys_get_temp_dir(), '');
+        unlink($packageDir);
+        mkdir($packageDir);
+
+        $dm = $this->composer->getDownloadManager();
+        $this->output->setVerbosity(OutputInterface::VERBOSITY_QUIET);
+        $dm->download($package, $packageDir);
+        $this->output->setVerbosity($this->outputVerbosity);
+
+        $this->packageDirCache[$package->getName()] = $packageDir;
+
+        return $packageDir;
+    }
+
+    /**
+     * @param CompletePackage $package
+     * @return array
+     */
+    protected function prepareIncludeFiles(CompletePackage $package)
+    {
+        $patterns = array();
+        $extra = $package->getExtra();
+        $packageDir = $this->getPackageDir($package);
+        foreach ($extra['modera-monorepo']['include'] as $path) {
+            $patterns[] = $packageDir . DIRECTORY_SEPARATOR . $path;
+        }
+
+        return array_map(
             function ($files, $pattern) {
                 if (!$files) {
                     throw new \RuntimeException('modera-monorepo: No files matched \''.$pattern.'\'');
@@ -175,41 +377,32 @@ class Plugin implements PluginInterface, EventSubscriberInterface
             array_map('glob', $patterns),
             $patterns
         );
+    }
 
-        $loadedFiles = array();
+    /**
+     * @param CompletePackage $package
+     * @return array
+     */
+    protected function loadIncludeFiles(CompletePackage $package)
+    {
+        $files = $this->prepareIncludeFiles($package);
+        $packageDir = $this->getPackageDir($package);
+
+        $extra = $package->getExtra();
+        $extra['modera-monorepo']['packages'] = array();
+
         foreach (array_reduce($files, 'array_merge', array()) as $path) {
-            if (!isset($loadedFiles[$path])) {
-                $loadedFiles[$path] = true;
-                $this->io->writeError(
-                    'Loading <comment>'.str_replace($targetDir, $package->getPrettyName().':', $path).'</comment>...',
-                    true,
-                    IOInterface::VERBOSE
-                );
-
-                $json = $this->readPackageJson($path);
-                $_package = $this->loadPackage($json);
-
-                $requires = $_package->getRequires();
-                foreach (array_keys($package->getReplaces()) as $key) {
-                    unset($requires[$key]);
-                }
-                foreach ($requires as $name => $link) {
-                    $extra['require'][] = $link;
-                }
-
-                if ($isDevMode) {
-                    $devRequires = $_package->getDevRequires();
-                    foreach (array_keys($package->getReplaces()) as $key) {
-                        unset($devRequires[$key]);
-                    }
-                    foreach ($devRequires as $name => $link) {
-                        $extra['require-dev'][] = $link;
-                    }
-                }
-            }
+            $this->io->writeError(
+                'Loading <comment>' . str_replace($packageDir, $package->getName() . ':', $path) . '</comment>...',
+                true,
+                IOInterface::VERY_VERBOSE
+            );
+            $extra['modera-monorepo']['packages'][] = $this->readPackageJson($path);
         }
 
-        return $extra;
+        $package->setExtra($extra);
+
+        return $extra['modera-monorepo']['packages'];
     }
 
     /**
