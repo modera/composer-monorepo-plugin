@@ -28,17 +28,17 @@ use Symfony\Component\Console\Output\OutputInterface;
 class Plugin implements PluginInterface, EventSubscriberInterface
 {
     /**
-     * @var Composer $composer
+     * @var Composer
      */
     protected $composer;
 
     /**
-     * @var IOInterface $io
+     * @var IOInterface
      */
     protected $io;
 
     /**
-     * @var OutputInterface $output
+     * @var OutputInterface
      */
     protected $output;
 

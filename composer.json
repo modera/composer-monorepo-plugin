@@ -17,7 +17,7 @@
     "extra": {
         "class": "Modera\\Composer\\MonorepoPlugin\\Plugin",
         "branch-alias": {
-            "dev-master": "1.0-dev"
+            "dev-master": "1.x-dev"
         }
     }
 }
