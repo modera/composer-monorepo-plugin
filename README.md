@@ -1,15 +1,24 @@
 # modera/composer-monorepo-plugin
 
+Composer plugin to combine requirements from multiple composer.json files and run package events on them.
+
 ## Installation
+
+Add a repository globally:
 
 ```sh
 $ composer config -g repositories.dev_modera composer https://packages.dev.modera.org
+```
+
+Install plugin globally:
+
+```sh
 $ composer global require modera/composer-monorepo-plugin:dev-master
 ```
 
 ## Usage
 
-composer.json
+Add "extra/modera-monorepo" section to composer.json in your bundle:
 
 ```json
 {
@@ -17,7 +26,8 @@ composer.json
     "extra": {
         "modera-monorepo": {
             "include": [
-                "src/Modera/*/composer.json"
+                "src/Modera/*/composer.json",
+                "src/Some/Other/composer.json"
             ]
         }
     }
