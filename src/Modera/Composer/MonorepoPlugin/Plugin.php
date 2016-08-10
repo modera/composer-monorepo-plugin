@@ -17,6 +17,7 @@ use Composer\Installer\InstallerEvent;
 use Composer\Installer\InstallerEvents;
 use Composer\Package\Loader\ArrayLoader;
 use Composer\Package\RootPackageInterface;
+use Composer\Repository\InstalledRepositoryInterface;
 use Composer\EventDispatcher\EventSubscriberInterface;
 use Composer\DependencyResolver\Operation\UpdateOperation;
 use Symfony\Component\Console\Output\OutputInterface;
@@ -281,8 +282,10 @@ class Plugin implements PluginInterface, EventSubscriberInterface
     protected function canHandle(CompletePackage $package)
     {
         $extra = $package->getExtra();
-        if (isset($extra['modera-monorepo'])) {
-            return true;
+        if (!$package->getRepository() instanceof InstalledRepositoryInterface) {
+            if (isset($extra['modera-monorepo'])) {
+                return true;
+            }
         }
 
         return false;
