@@ -160,11 +160,11 @@ class Plugin implements PluginInterface, EventSubscriberInterface
                         $link->getPrettyConstraint()
                     );
 
-                    $this->io->writeError(
-                        'Adding dependency <comment>'.$link.'</comment>',
-                        true,
-                        IOInterface::VERY_VERBOSE
-                    );
+                    $msg = 'Adding dependency';
+                    $msg .= ' <info>' . $_package->getName() . '</info>';
+                    $msg .= '<comment>' . str_replace($package->getName(), '', $link) . '</comment>';
+
+                    $this->io->writeError($msg, true, IOInterface::VERY_VERBOSE);
                     $request->install($link->getTarget(), $link->getConstraint());
                 }
                 $package->setRequires($requires);
@@ -183,11 +183,12 @@ class Plugin implements PluginInterface, EventSubscriberInterface
                             $link->getDescription(),
                             $link->getPrettyConstraint()
                         );
-                        $this->io->writeError(
-                            'Adding dev dependency <comment>'.$link.'</comment>',
-                            true,
-                            IOInterface::VERY_VERBOSE
-                        );
+
+                        $msg = 'Adding dev dependency';
+                        $msg .= ' <info>' . $_package->getName() . '</info>';
+                        $msg .= '<comment>' . str_replace($package->getName(), '', $link) . '</comment>';
+
+                        $this->io->writeError($msg, true, IOInterface::VERY_VERBOSE);
                         $request->install($link->getTarget(), $link->getConstraint());
                     }
                     $package->setDevRequires($devRequires);
@@ -265,11 +266,7 @@ class Plugin implements PluginInterface, EventSubscriberInterface
                     $msg .= ' <info>' . $_package->getName() . '</info>';
                     $msg .= ' (<comment>' . $package->getFullPrettyVersion() . '</comment>)';
 
-                    $this->io->writeError(
-                        $msg,
-                        true,
-                        IOInterface::VERBOSE
-                    );
+                    $this->io->writeError($msg, true, IOInterface::VERBOSE);
                 }
             }
         }
@@ -307,19 +304,28 @@ class Plugin implements PluginInterface, EventSubscriberInterface
             $packages[] = $root;
         }
 
+        $cache = array();
+        $pool = $event->getPool();
         $request = $event->getRequest();
-        for ($i = 1; $i < $event->getPool()->count(); $i++) {
-            $package = $event->getPool()->packageById($i);
 
-            if ($package instanceof AliasPackage) {
-                $package = $package->getAliasOf();
-            }
+        foreach ($request->getJobs() as $job) {
+            if (in_array($job['cmd'], array('install', 'update'))) {
+                if (isset($job['packageName']) && isset($job['constraint'])) {
+                    foreach($pool->whatProvides($job['packageName'], $job['constraint']) as $package) {
+                        if ($package instanceof AliasPackage) {
+                            $package = $package->getAliasOf();
+                        }
 
-            if ($this->canHandle($package)) {
-                foreach ($request->getJobs() as $job) {
-                    if (isset($job['packageName']) && $package->getName() == $job['packageName']) {
-                        if ('remove' != $job['cmd']) {
-                            $packages[] = $package;
+                        if ($this->canHandle($package)) {
+                            if (!in_array($package, $packages)) {
+                                if (!isset($cache[$package->getName()])) {
+                                    $cache[$package->getName()] = array();
+                                }
+                                if (!in_array($package->getPrettyVersion(), $cache[$package->getName()])) {
+                                    $cache[$package->getName()][] = $package->getPrettyVersion();
+                                    $packages[] = $package;
+                                }
+                            }
                         }
                     }
                 }
@@ -339,8 +345,12 @@ class Plugin implements PluginInterface, EventSubscriberInterface
             return getcwd();
         }
 
-        if (isset($this->packageDirCache[$package->getName()])) {
-            return $this->packageDirCache[$package->getName()];
+        if (!isset($this->packageDirCache[$package->getName()])) {
+            $this->packageDirCache[$package->getName()] = array();
+        }
+
+        if (isset($this->packageDirCache[$package->getName()][$package->getPrettyVersion()])) {
+            return $this->packageDirCache[$package->getName()][$package->getPrettyVersion()];
         }
 
         $packageDir = tempnam(sys_get_temp_dir(), '');
@@ -352,7 +362,7 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         $dm->download($package, $packageDir);
         $this->output->setVerbosity($this->outputVerbosity);
 
-        $this->packageDirCache[$package->getName()] = $packageDir;
+        $this->packageDirCache[$package->getName()][$package->getPrettyVersion()] = $packageDir;
 
         return $packageDir;
     }
@@ -395,11 +405,11 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         $extra['modera-monorepo']['packages'] = array();
 
         foreach (array_reduce($files, 'array_merge', array()) as $path) {
-            $this->io->writeError(
-                'Loading <comment>' . str_replace($packageDir, $package->getName() . ':', $path) . '</comment>...',
-                true,
-                IOInterface::VERY_VERBOSE
-            );
+            $msg = 'Loading';
+            $msg .= ' <info>' . $package->getName() . ':' . $package->getPrettyVersion() . '</info>';
+            $msg .= ' <comment>' . str_replace($packageDir, '', $path) . '</comment>';
+
+            $this->io->writeError($msg, true, IOInterface::VERY_VERBOSE);
             $extra['modera-monorepo']['packages'][] = $this->readPackageJson($path);
         }
 
