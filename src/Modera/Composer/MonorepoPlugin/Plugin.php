@@ -308,22 +308,33 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         $pool = $event->getPool();
         $request = $event->getRequest();
 
+        $reflector = new \ReflectionObject($pool);
+        $matchMethod = $reflector->getMethod('match');
+        $matchMethod->setAccessible(true);
+
         foreach ($request->getJobs() as $job) {
             if (in_array($job['cmd'], array('install', 'update'))) {
                 if (isset($job['packageName']) && isset($job['constraint'])) {
-                    foreach($pool->whatProvides($job['packageName'], $job['constraint']) as $package) {
+                    for ($i = 0; $i < $pool->count(); $i++) {
+                        $package = $pool->packageById($i + 1);
+
                         if ($package instanceof AliasPackage) {
-                            $package = $package->getAliasOf();
+                            continue;
                         }
 
-                        if ($this->canHandle($package)) {
-                            if (!in_array($package, $packages)) {
-                                if (!isset($cache[$package->getName()])) {
-                                    $cache[$package->getName()] = array();
-                                }
-                                if (!in_array($package->getPrettyVersion(), $cache[$package->getName()])) {
-                                    $cache[$package->getName()][] = $package->getPrettyVersion();
-                                    $packages[] = $package;
+                        if ($package->getName() == $job['packageName']) {
+                            $match = $matchMethod->invoke($pool, $package, $job['packageName'], $job['constraint'], false);
+                            if ($pool::MATCH == $match) {
+                                if ($this->canHandle($package)) {
+                                    if (!in_array($package, $packages)) {
+                                        if (!isset($cache[$package->getName()])) {
+                                            $cache[$package->getName()] = array();
+                                        }
+                                        if (!in_array($package->getPrettyVersion(), $cache[$package->getName()])) {
+                                            $cache[$package->getName()][] = $package->getPrettyVersion();
+                                            $packages[] = $package;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -365,6 +376,41 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         $this->packageDirCache[$package->getName()][$package->getPrettyVersion()] = $packageDir;
 
         return $packageDir;
+    }
+
+    /**
+     * @param CompletePackage $package
+     */
+    protected function removePackageDir(CompletePackage $package)
+    {
+        if ($package instanceof RootPackageInterface) {
+            return;
+        }
+
+        if (!isset($this->packageDirCache[$package->getName()])) {
+            $this->packageDirCache[$package->getName()] = array();
+        }
+
+        $removeDir = function($dir) use(&$removeDir) {
+            if (is_dir($dir)) {
+                $objects = scandir($dir);
+                foreach ($objects as $object) {
+                    if ($object != "." && $object != "..") {
+                        if (is_dir($dir . "/" . $object)) {
+                            $removeDir($dir."/".$object);
+                        } else {
+                            unlink($dir."/".$object);
+                        }
+                    }
+                }
+                rmdir($dir);
+            }
+        };
+
+        if (isset($this->packageDirCache[$package->getName()][$package->getPrettyVersion()])) {
+            $removeDir($this->packageDirCache[$package->getName()][$package->getPrettyVersion()]);
+            unset($this->packageDirCache[$package->getName()][$package->getPrettyVersion()]);
+        }
     }
 
     /**
@@ -414,6 +460,8 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         }
 
         $package->setExtra($extra);
+
+        $this->removePackageDir($package);
 
         return $extra['modera-monorepo']['packages'];
     }
