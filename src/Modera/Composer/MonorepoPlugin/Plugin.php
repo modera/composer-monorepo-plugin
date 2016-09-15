@@ -220,16 +220,19 @@ class Plugin implements PluginInterface, EventSubscriberInterface
             $package = $operation->getPackage();
         }
 
-        $operationClass = get_class($operation);
-        $eventDispatcher = $this->composer->getEventDispatcher();
-
-        $reflector = new \ReflectionObject($eventDispatcher);
-        $popEventMethod = $reflector->getMethod('popEvent');
-        $popEventMethod->setAccessible(true);
-
         $extra = $package->getExtra();
-        if (isset($extra['modera-monorepo']['packages'])) {
-            foreach ($extra['modera-monorepo']['packages'] as $json) {
+        if (isset($extra['modera-monorepo'])) {
+
+            $operationClass = get_class($operation);
+            $eventDispatcher = $this->composer->getEventDispatcher();
+
+            $reflector = new \ReflectionObject($eventDispatcher);
+            $popEventMethod = $reflector->getMethod('popEvent');
+            $popEventMethod->setAccessible(true);
+
+            $data = $this->loadIncludeFiles($package);
+
+            foreach ($data as $json) {
                 $_package = $this->loadPackage($json);
                 if ($operation instanceof UpdateOperation) {
                     $mockOperation = new $operationClass(
@@ -447,8 +450,7 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         $files = $this->prepareIncludeFiles($package);
         $packageDir = $this->getPackageDir($package);
 
-        $extra = $package->getExtra();
-        $extra['modera-monorepo']['packages'] = array();
+        $packages = array();
 
         foreach (array_reduce($files, 'array_merge', array()) as $path) {
             $msg = 'Loading';
@@ -456,14 +458,12 @@ class Plugin implements PluginInterface, EventSubscriberInterface
             $msg .= ' <comment>' . str_replace($packageDir, '', $path) . '</comment>';
 
             $this->io->writeError($msg, true, IOInterface::VERY_VERBOSE);
-            $extra['modera-monorepo']['packages'][] = $this->readPackageJson($path);
+            $packages[] = $this->readPackageJson($path);
         }
-
-        $package->setExtra($extra);
 
         $this->removePackageDir($package);
 
-        return $extra['modera-monorepo']['packages'];
+        return $packages;
     }
 
     /**
