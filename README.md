@@ -37,6 +37,13 @@ Add "extra/modera-monorepo" section to "monolith" composer.json of your package:
 look for nested "composer.json" files. In this given example we assume that your package(library) has a "src/Modera" 
 directory in which other directories live which have composer.json inside them.
 
+After each change in nested "composer.json" files you need to run:
+
+```sh
+$ composer update
+```
+
+If all passed correctly, plugin combine all requirements and save them into root "composer.json".
 
 ## Licensing
 
