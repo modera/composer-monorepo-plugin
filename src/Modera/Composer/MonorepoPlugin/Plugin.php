@@ -171,8 +171,11 @@ class Plugin implements PluginInterface, EventSubscriberInterface
         $package = $composer->getPackage();
 
         $replace = array();
-        foreach (array_keys($package->getReplaces()) as $key) {
-            $replace[] = $key;
+        foreach ($package->getReplaces() as $key => $link) {
+            /* @var Link $link */
+            if (!in_array($link->getTarget(), $replace)) {
+                $replace[] = $link->getTarget();
+            }
         }
 
         $requires = array();
