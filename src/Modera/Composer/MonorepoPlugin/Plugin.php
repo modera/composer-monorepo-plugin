@@ -13,6 +13,7 @@ use Composer\Json\JsonManipulator;
 use Composer\Package\AliasPackage;
 use Composer\Plugin\PluginInterface;
 use Composer\Package\PackageInterface;
+use Composer\Package\Loader\ArrayLoader;
 use Composer\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -30,6 +31,11 @@ class Plugin implements PluginInterface, EventSubscriberInterface
      * @var Repository
      */
     protected $devRepository = null;
+
+    /**
+     * @var Link[]
+     */
+    protected $localConfig = null;
 
     /**
      * {@inheritdoc}
@@ -83,10 +89,12 @@ class Plugin implements PluginInterface, EventSubscriberInterface
             $devRepository = $composer->getRepositoryManager()->createRepository($devRepositoryConfig['type'], $devRepositoryConfig);
             $composer->getRepositoryManager()->addRepository($devRepository);
 
-            $localConfig = array(
-                'require' => array(),
-                'require-dev' => array(),
+            $this->localConfig = array(
+                'require' => isset($extra[$type]['require']) ? $extra[$type]['require'] : array(),
+                'require-dev' => isset($extra[$type]['require-dev']) ? $extra[$type]['require-dev'] : array(),
             );
+
+            $localConfig = $this->localConfig;
             foreach ($repository->getPackages() as $localPackage) {
                 /* @var PackageInterface $localPackage */
                 if (!$localPackage instanceof AliasPackage) {
@@ -139,7 +147,7 @@ class Plugin implements PluginInterface, EventSubscriberInterface
                     $link->getPrettyConstraint()
                 );
             }
-            $package->setDevRequires($localRequires);
+            $package->setDevRequires($localDevRequires);
 
             $this->repository = $repository;
             $this->devRepository = $devRepository;
@@ -152,20 +160,20 @@ class Plugin implements PluginInterface, EventSubscriberInterface
     public function postUpdateCmd(Event $event)
     {
         if ($this->repository) {
-            $this->updateJson($event, $this->repository, 'require');
+            $this->updateJson('require', $event, $this->repository);
         }
 
         if ($this->devRepository) {
-            $this->updateJson($event, $this->devRepository, 'require-dev');
+            $this->updateJson('require-dev', $event, $this->devRepository);
         }
     }
 
     /**
+     * @param $type
      * @param Event $event
      * @param Repository $repository
-     * @param $type
      */
-    private function updateJson(Event $event, Repository $repository, $type)
+    private function updateJson($type, Event $event, Repository $repository)
     {
         $composer = $event->getComposer();
         $package = $composer->getPackage();
@@ -178,7 +186,8 @@ class Plugin implements PluginInterface, EventSubscriberInterface
             }
         }
 
-        $requires = array();
+        $requires = $this->localConfig[$type];
+
         foreach ($repository->getPackages() as $localPackage) {
             if (!$localPackage instanceof AliasPackage) {
                 /* @var Link $link */
