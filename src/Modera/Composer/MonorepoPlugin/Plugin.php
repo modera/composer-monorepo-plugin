@@ -13,7 +13,6 @@ use Composer\Json\JsonManipulator;
 use Composer\Package\AliasPackage;
 use Composer\Plugin\PluginInterface;
 use Composer\Package\PackageInterface;
-use Composer\Package\Loader\ArrayLoader;
 use Composer\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -22,6 +21,11 @@ use Composer\EventDispatcher\EventSubscriberInterface;
  */
 class Plugin implements PluginInterface, EventSubscriberInterface
 {
+    /**
+     * @var Installer
+     */
+    private $installer;
+
     /**
      * @var Repository
      */
@@ -38,15 +42,31 @@ class Plugin implements PluginInterface, EventSubscriberInterface
     protected $localConfig = null;
 
     /**
-     * {@inheritdoc}
+     * {@inheritDoc}
      */
     public function activate(Composer $composer, IOInterface $io)
     {
-        $composer->getInstallationManager()->addInstaller(new Installer($io, $composer));
+        $this->installer = new Installer($io, $composer);
+        $composer->getInstallationManager()->addInstaller($this->installer);
     }
 
     /**
-     * {@inheritdoc}
+     * {@inheritDoc}
+     */
+    public function deactivate(Composer $composer, IOInterface $io)
+    {
+        $composer->getInstallationManager()->removeInstaller($this->installer);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function uninstall(Composer $composer, IOInterface $io)
+    {
+    }
+
+    /**
+     * {@inheritDoc}
      */
     public static function getSubscribedEvents()
     {

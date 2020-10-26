@@ -13,7 +13,7 @@ use Composer\Repository\InstalledRepositoryInterface;
 class Installer implements InstallerInterface
 {
     /**
-     * {@inheritdoc}
+     * {@inheritDoc}
      */
     public function supports($packageType)
     {
@@ -21,7 +21,7 @@ class Installer implements InstallerInterface
     }
 
     /**
-     * {@inheritdoc}
+     * {@inheritDoc}
      */
     public function getInstallPath(PackageInterface $package)
     {
@@ -37,21 +37,21 @@ class Installer implements InstallerInterface
     }
 
     /**
-     * {@inheritdoc}
+     * {@inheritDoc}
      */
     public function install(InstalledRepositoryInterface $repo, PackageInterface $package)
     {
     }
 
     /**
-     * {@inheritdoc}
+     * {@inheritDoc}
      */
     public function update(InstalledRepositoryInterface $repo, PackageInterface $initial, PackageInterface $target)
     {
     }
 
     /**
-     * {@inheritdoc}
+     * {@inheritDoc}
      */
     public function uninstall(InstalledRepositoryInterface $repo, PackageInterface $package)
     {

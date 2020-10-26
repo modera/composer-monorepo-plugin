@@ -67,7 +67,7 @@ class Repository extends ArrayRepository implements ConfigurableRepositoryInterf
     }
 
     /**
-     * {@inheritdoc}
+     * {@inheritDoc}
      */
     public function getRepoConfig()
     {
@@ -75,7 +75,7 @@ class Repository extends ArrayRepository implements ConfigurableRepositoryInterf
     }
 
     /**
-     * {@inheritdoc}
+     * {@inheritDoc}
      */
     protected function initialize()
     {

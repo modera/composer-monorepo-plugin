@@ -9,7 +9,7 @@
         }
     ],
     "require": {
-        "composer-plugin-api": "^1.0.0"
+        "composer-plugin-api": "^1.0 || ^2.0"
     },
     "autoload": {
         "psr-0": { "Modera\\Composer\\MonorepoPlugin": "src/" }
